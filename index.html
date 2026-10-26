@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Cameraman vs Zombies 3D</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0c0c14; font-family: sans-serif; user-select: none; touch-action: none; }
+        #canvas-container { width: 100%; height: 100%; display: block; position: absolute; top: 0; left: 0; }
+        #ui { position: absolute; top: 15px; left: 15px; z-index: 10; color: white; background: rgba(20,20,30,0.8); padding: 10px 15px; border-radius: 8px; border: 1px solid #00ffff; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; transform: translate(-50%, -50%); pointer-events: none; display: none; z-index: 5; }
+        #crosshair::before, #crosshair::after { content: ''; position: absolute; background: #00ffff; }
+        #crosshair::before { top: 9px; left: 0; width: 20px; height: 2px; }
+        #crosshair::after { top: 0; left: 9px; width: 2px; height: 20px; }
+        .controls { position: absolute; bottom: 20px; left: 20px; right: 20px; display: flex; justify-content: space-between; z-index: 20; pointer-events: none; }
+        .joystick { width: 120px; height: 120px; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; position: relative; pointer-events: auto; }
+        .knob { width: 50px; height: 50px; background: rgba(0,255,255,0.7); border-radius: 50%; position: absolute; top: 35px; left: 35px; }
+        .buttons { display: flex; gap: 10px; pointer-events: auto; align-items: flex-end; }
+        .btn { width: 60px; height: 60px; border-radius: 50%; background: rgba(30,30,45,0.9); border: 2px solid #fff; color: white; font-size: 20px; display: flex; align-items: center; justify-content: center; }
+        .btn-sword { width: 70px; height: 70px; background: rgba(138,43,226,0.9); border-color: #da70d6; }
+        #look-zone { position: absolute; top: 0; right: 0; width: 50%; height: 70%; z-index: 5; }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div id="crosshair"></div>
+    <div id="ui">
+        <div><b>CAMERAMAN HP:</b> <span id="hp">100</span></div>
+        <div><b>SCORE:</b> <span id="score">0</span></div>
+    </div>
+    <div id="look-zone"></div>
+    <div class="controls">
+        <div id="joystick" class="joystick"><div id="knob" class="knob"></div></div>
+        <div class="buttons">
+            <button id="btn-lock" class="btn">🔒</button>
+            <button id="btn-jump" class="btn">⬆️</button>
+            <button id="btn-attack" class="btn btn-sword">⚔️</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x11111a);
+        scene.fog = new THREE.FogExp2(0x11111a, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(20, 40, 20);
+        scene.add(dirLight);
+
+        // พื้นถนน
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0x22252a }));
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
+        scene.add(new THREE.GridHelper(200, 40, 0x00ffff, 0x444444));
+
+        // ผู้เล่น (Cameraman พร้อมดาบ Titan TV Man ที่แขนขวา)
+        const player = new THREE.Group();
+        scene.add(player);
+
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1a1a24 });
+        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.1, 0.4), bodyMat);
+        torso.position.y = 1.1;
+        player.add(torso);
+
+        // หัวกล้อง
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.6, 0.8), bodyMat);
+        head.position.set(0, 1.8, 0);
+        player.add(head);
+        const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.3), new THREE.MeshBasicMaterial({ color: 0x00ffff }));
+        lens.rotation.x = Math.PI / 2;
+        lens.position.set(0, 1.8, -0.45);
+        player.add(lens);
+
+        // แขนขวาพร้อมดาบ Titan TV Man
+        const rightArmGroup = new THREE.Group();
+        rightArmGroup.position.set(0.55, 1.1, 0);
+        player.add(rightArmGroup);
+        const rightArm = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.8, 0.25), bodyMat);
+        rightArm.position.y = -0.3;
+        rightArmGroup.add(rightArm);
+
+        // ดาบติดแขน
+        const bladeGroup = new THREE.Group();
+        bladeGroup.position.set(0, -0.6, 0);
+        rightArmGroup.add(bladeGroup);
+        const bladeSpike = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.2, 1.3), new THREE.MeshBasicMaterial({ color: 0x9400D3 }));
+        bladeSpike.position.set(0, 0, -0.6);
+        bladeGroup.add(bladeSpike);
+
+        // ขา
+        const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.8, 0.3), bodyMat);
+        leftLeg.position.set(-0.2, 0.4, 0);
+        player.add(leftLeg);
+        const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.8, 0.3), bodyMat);
+        rightLeg.position.set(0.2, 0.4, 0);
+        player.add(rightLeg);
+
+        // ซอมบี้
+        const zombies = [];
+        function spawnZombie() {
+            const z = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.6, 0.6), new THREE.MeshStandardMaterial({ color: 0x3b5e43 }));
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 30 + Math.random() * 30;
+            z.position.set(player.position.x + Math.cos(angle) * dist, 0.8, player.position.z + Math.sin(angle) * dist);
+            scene.add(z);
+            zombies.push({ mesh: z, hp: 40 });
+        }
+        for(let i=0; i<8; i++) spawnZombie();
+
+        // ตัวแปรควบคุม
+        let camAngleX = 0, camAngleY = 0.4, camDist = 6;
+        let isShiftLock = false, hp = 100, score = 0;
+        let joyActive = false, joyOrigin = {x:0, y:0}, joyMove = {x:0, y:0};
+        let isAttacking = false, attackTime = 0;
+
+        // ควบคุมจอยสติ๊ก
+        const joyZone = document.getElementById('joystick');
+        const knob = document.getElementById('knob');
+        joyZone.addEventListener('pointerdown', e => {
+            joyActive = true;
+            const rect = joyZone.getBoundingClientRect();
+            joyOrigin = { x: rect.left + 60, y: rect.top + 60 };
+            updateJoy(e.clientX, e.clientY);
+        });
+        window.addEventListener('pointermove', e => {
+            if(joyActive) updateJoy(e.clientX, e.clientY);
+        });
+        window.addEventListener('pointerup', () => {
+            joyActive = false; joyMove = {x:0, y:0};
+            knob.style.transform = `translate(0px, 0px)`;
+        });
+        function updateJoy(x, y) {
+            let dx = x - joyOrigin.x, dy = y - joyOrigin.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            if(dist > 40) { dx = (dx/dist)*40; dy = (dy/dist)*40; }
+            knob.style.transform = `translate(${dx}px, ${dy}px)`;
+            joyMove = { x: dx/40, y: dy/40 };
+        }
+
+        // หมุนกล้อง
+        let lookActive = false, lastLook = {x:0, y:0};
+        document.getElementById('look-zone').addEventListener('pointerdown', e => {
+            lookActive = true; lastLook = {x: e.clientX, y: e.clientY};
+        });
+        window.addEventListener('pointermove', e => {
+            if(lookActive) {
+                let dx = e.clientX - lastLook.x, dy = e.clientY - lastLook.y;
+                camAngleX -= dx * 0.007;
+                camAngleY = Math.max(0.1, Math.min(1.4, camAngleY + dy * 0.007));
+                lastLook = {x: e.clientX, y: e.clientY};
+            }
+        });
+        window.addEventListener('pointerup', () => lookActive = false);
+
+        // ปุ่มแอคชั่น
+        document.getElementById('btn-lock').addEventListener('click', () => {
+            isShiftLock = !isShiftLock;
+            document.getElementById('crosshair').style.display = isShiftLock ? 'block' : 'none';
+        });
+        document.getElementById('btn-attack').addEventListener('click', () => {
+            if(isAttacking) return;
+            isAttacking = true; attackTime = 0;
+            // เช็คโจมตีซอมบี้รอบตัว
+            zombies.forEach((z, index) => {
+                if(player.position.distanceTo(z.mesh.position) < 4.5) {
+                    z.hp -= 40;
+                    if(z.hp <= 0) {
+                        scene.remove(z.mesh);
+                        zombies.splice(index, 1);
+                        score += 10;
+                        document.getElementById('score').innerText = score;
+                        spawnZombie();
+                    }
+                }
+            });
+        });
+
+        // ลูปเกม
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if(joyMove.x !== 0 || joyMove.y !== 0) {
+                let angle = Math.atan2(joyMove.x, joyMove.y) + camAngleX;
+                player.position.x += Math.sin(angle) * 0.12;
+                player.position.z += Math.cos(angle) * 0.12;
+                if(!isShiftLock) player.rotation.y = angle;
+            }
+            if(isShiftLock) player.rotation.y = camAngleX;
+
+            if(isAttacking) {
+                attackTime += 0.2;
+                rightArmGroup.rotation.x = -Math.sin(attackTime) * 1.5;
+                if(attackTime > Math.PI) isAttacking = false;
+            }
+
+            // ซอมบี้เดินเข้าหา
+            zombies.forEach(z => {
+                let dir = new THREE.Vector3().subVectors(player.position, z.mesh.position);
+                let dist = dir.length();
+                dir.normalize();
+                if(dist > 1.2) {
+                    z.mesh.position.addScaledVector(dir, 0.04);
+                    z.mesh.lookAt(player.position.x, z.mesh.position.y, player.position.z);
+                } else {
+                    hp -= 0.5;
+                    document.getElementById('hp').innerText = Math.max(0, Math.floor(hp));
+                }
+            });
+
+            // กล้องตาม
+            let cx = player.position.x + Math.sin(camAngleX) * Math.cos(camAngleY) * camDist;
+            let cy = player.position.y + 1 + Math.sin(camAngleY) * camDist;
+            let cz = player.position.z + Math.cos(camAngleX) * Math.cos(camAngleY) * camDist;
+            camera.position.set(cx, cy, cz);
+            camera.lookAt(player.position.x, player.position.y + 1, player.position.z);
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+  </html>
+  
